@@ -8,7 +8,7 @@ namespace urls {
     const std::string repo = "Cpp_Project_Updater";
     const std::string branch = "main/";
 
-    const std::string version_url = github_raw_base + owner + repo + "/" + branch + "latest_version.txt";
+    const std::string version_url = github_raw_base + owner + repo + "/" + branch + "version.txt";
     const std::string source_url = github_base + owner + repo + "/archive/refs/heads/main.zip";
 }
 
