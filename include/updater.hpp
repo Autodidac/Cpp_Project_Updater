@@ -16,7 +16,20 @@
 
 namespace updater {
 
-    // download current source
+    // Unzip source_code.zip
+    inline bool extract_zip(const std::string& archive_file) {
+        std::cout << "Extracting source files from " << archive_file << "\n";
+
+#if defined(_WIN32)
+        std::string extract_command = "unzip -o " + archive_file;
+#elif defined(__linux__) || defined(__APPLE__)
+        std::string extract_command = "tar -xf " + archive_file;
+#endif
+
+        return system(extract_command.c_str()) == 0;
+    }
+
+    // Download current source
     inline bool download_file(const std::string& url, const std::string& output_path) {
         std::cout << "Downloading: " << url << " -> " << output_path <<  "\n";
 
@@ -86,63 +99,122 @@ namespace updater {
         return latest_version != current_version;
     }
 
-
-    // unzip source code
-    inline bool extract_zip(const std::string& archive_file) {
-        std::cout << "Extracting source files from " << archive_file <<  "\n";
+    // cleanup build files
+    inline void clean_up_build_files() {
+        std::cout << "[INFO] Cleaning up build artifacts...\n";
 
 #if defined(_WIN32)
-        std::string extract_command = "unzip -o " + archive_file;
+        system("del /F /Q build.ninja build_with_msvc.bat main.obj ninja.zip >nul 2>&1");
 #elif defined(__linux__) || defined(__APPLE__)
-        std::string extract_command = "tar -xf " + archive_file;
+        system("rm -f build.ninja build_with_msvc.bat main.obj ninja.zip");
 #endif
 
-        return system(extract_command.c_str()) == 0;
+        std::cout << "[INFO] Cleanup complete.\n";
     }
 
 
     // replace binary
     inline void replace_binary(const std::string& new_binary) {
-        std::cout << "Replacing current binary..." <<  "\n";
+        std::cout << "Replacing current binary...\n";
 
 #if defined(_WIN32)
+        clean_up_build_files();
+
         std::ofstream batchFile("replace_and_restart.bat");
         if (!batchFile) {
-            std::cerr << "ERROR: Failed to create batch file for self-replacement." <<  "\n";
+            std::cerr << "ERROR: Failed to create batch file for self-replacement.\n";
             return;
         }
 
         batchFile << "@echo off\n"
             << "timeout /t 2 >nul\n"
+            << "taskkill /IM updater.exe /F >nul 2>&1\n"
+            << "timeout /t 1 >nul\n"
             << "del updater.exe >nul 2>&1\n"
+            << "if exist updater.exe (\n"
+            << "    timeout /t 1 >nul\n"
+            << "    goto retry\n"
+            << ")\n"
             << "rename \"" << new_binary << "\" \"updater.exe\"\n"
-            << "start updater.exe\n"
-            << "del %0\n"; // Deletes the batch file after execution
+            << "if exist updater.exe (\n"
+            << "    start updater.exe\n"
+            << "    del %0\n"
+            << ") else (\n"
+            << "    echo ERROR: Failed to rename new binary. Update aborted!\n"
+            << ")\n";
+
         batchFile.close();
 
         system("start replace_and_restart.bat");
         exit(0);
 
 #elif defined(__linux__) || defined(__APPLE__)
+        clean_up_build_files();
+
         std::ofstream scriptFile("replace_and_restart.sh");
         if (!scriptFile) {
-            std::cerr << "ERROR: Failed to create shell script for self-replacement." <<  "\n";
+            std::cerr << "ERROR: Failed to create shell script for self-replacement.\n";
             return;
         }
 
         scriptFile << "#!/bin/sh\n"
             << "sleep 2\n"
+            << "pkill -f updater\n"
+            << "sleep 1\n"
+            << "if pgrep -f updater; then\n"
+            << "    sleep 1\n"
+            << "    pkill -9 -f updater\n"
+            << "fi\n"
             << "rm -f updater\n"
             << "mv \"" << new_binary << "\" updater\n"
             << "chmod +x updater\n"
             << "./updater &\n"
             << "rm -- \"$0\"\n";
+
         scriptFile.close();
 
         system("chmod +x replace_and_restart.sh && nohup ./replace_and_restart.sh &");
         exit(0);
 #endif
     }
+
+
+
+
+
+    // Download and install Ninja
+    inline bool download_ninja() {
+        std::cout << "Downloading Ninja build system...";
+
+#if defined(_WIN32)
+            std::string ninja_url = "https://github.com/ninja-build/ninja/releases/latest/download/ninja-win.zip";
+        std::string ninja_zip = "ninja.zip";
+        std::string ninja_binary = "ninja.exe";
+#elif defined(__linux__) || defined(__APPLE__)
+            std::string ninja_url = "https://github.com/ninja-build/ninja/releases/latest/download/ninja-linux.zip";
+        std::string ninja_zip = "ninja.zip";
+        std::string ninja_binary = "ninja";
+#endif
+
+        if (!download_file(ninja_url, ninja_zip)) {
+            std::cerr << "ERROR: Failed to download Ninja.";
+                return false;
+        }
+
+#if defined(_WIN32)
+        std::string extract_command = "unzip -o " + ninja_zip;
+#elif defined(__linux__) || defined(__APPLE__)
+        std::string extract_command = "tar -xf " + ninja_zip;
+#endif
+
+        if (system(extract_command.c_str()) != 0) {
+            std::cerr << "ERROR: Failed to extract Ninja.";
+                return false;
+        }
+
+        return true;
+    }
+
 
     // generate ninja build file
     inline bool generate_ninja_build_file() {
@@ -153,16 +225,41 @@ namespace updater {
         }
 
 #if defined(_WIN32)
+        std::string compiler_setup = "call \"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\" && ";
         std::string compiler = "cl";
-#elif defined(__linux__) || defined(__APPLE__)
-        std::string compiler = "g++";
-#endif
+        std::string include_flag = "/I include"; // Add include path for Windows
+        std::string output_flag = "/Feupdater_new"; // Use correct output flag for MSVC
+        std::string exception_flag = "/EHsc"; // Enable C++ exception handling
+
+        // Create a batch script that sets up MSVC and runs Ninja
+        std::ofstream batchFile("build_with_msvc.bat");
+        if (!batchFile) {
+            std::cerr << "ERROR: Failed to create batch file for MSVC setup.\n";
+            return false;
+        }
+
+        batchFile << "@echo off\n"
+            << "call \"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\"\n"
+            << "ninja\n";
+        batchFile.close();
 
         buildFile << "rule cxx\n"
-            << "  command = " << compiler << " -std=c++20 -o updater_new src/main.cpp\n"
+            << "  command = " << compiler << " " << include_flag << " " << output_flag << " " << exception_flag << " -std:c++20 src/main.cpp\n"
             << "  description = Building updater...\n"
             << "\n"
             << "build updater_new: cxx src/main.cpp\n";
+
+#else
+        std::string compiler = "g++";
+        std::string include_flag = "-I include"; // Add include path for Linux/macOS
+        std::string output_flag = "-o updater_new";
+
+        buildFile << "rule cxx\n"
+            << "  command = " << compiler << " " << include_flag << " " << output_flag << " -std=c++20 src/main.cpp\n"
+            << "  description = Building updater...\n"
+            << "\n"
+            << "build updater_new: cxx src/main.cpp\n";
+#endif
 
         buildFile.close();
 
@@ -217,17 +314,28 @@ namespace updater {
             return;
         }
 
-        // Run Ninja inside the extracted directory
+        // Verify Ninja exists before running
+        std::ifstream ninja_check("ninja.exe");
+        if (!ninja_check) {
+            std::cerr << "ERROR: ninja.exe is missing! Re-downloading Ninja...\n";
+            if (!download_ninja()) {
+                std::cerr << "ERROR: Failed to download Ninja.\n";
+                return;
+            }
+        }
+
+        // Run Ninja in the current directory
 #if defined(_WIN32)
-        std::string ninja_command = "cd " + extracted_folder + " && ninja";
+    std::string ninja_command = "cmd /c build_with_msvc.bat";
 #else
-        std::string ninja_command = "cd " + extracted_folder + " && ./ninja";
+    std::string ninja_command = "./ninja";
 #endif
 
-        if (system(ninja_command.c_str()) != 0) {
-            std::cerr << "ERROR: Compilation failed! Update aborted." << std::endl;
-            return;
-        }
+if (system(ninja_command.c_str()) != 0) {
+    std::cerr << "ERROR: Compilation failed! Update aborted.\n";
+    return;
+}
+
 
         std::string new_binary = "updater_new";
 #if defined(_WIN32)
@@ -236,6 +344,7 @@ namespace updater {
 
         replace_binary(new_binary);
     }
+
 
 
 } // namespace updater
