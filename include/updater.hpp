@@ -138,14 +138,15 @@ namespace updater {
             << "rename \"" << new_binary << "\" \"updater.exe\"\n"
             << "if exist updater.exe (\n"
             << "    start updater.exe\n"
-            << "    del %0\n"
+            << "    exit\n" // Properly close the batch file
             << ") else (\n"
             << "    echo ERROR: Failed to rename new binary. Update aborted!\n"
+            << "    exit\n"
             << ")\n";
 
         batchFile.close();
 
-        system("start replace_and_restart.bat");
+        system("start /min replace_and_restart.bat"); // Runs minimized to prevent flashing console
         exit(0);
 
 #elif defined(__linux__) || defined(__APPLE__)
@@ -177,9 +178,6 @@ namespace updater {
         exit(0);
 #endif
     }
-
-
-
 
 
     // Download and install Ninja
