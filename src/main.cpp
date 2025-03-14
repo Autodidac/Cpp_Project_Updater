@@ -16,11 +16,11 @@ int main() {
     const std::string local_version = "version.txt";
 
     if (updater::check_for_updates(urls::version_url, local_version)) {
-        std::cout << "New version available!" << std::endl;
+        std::cout << "New version available!" << "\n";
         updater::update_from_source(urls::source_url);
     }
     else {
-        std::cout << "No updates available." << std::endl;
+        std::cout << "No updates available." << "\n";
     }
     return 0;
 }

@@ -16,8 +16,9 @@
 
 namespace updater {
 
+    // download current source
     inline bool download_file(const std::string& url, const std::string& output_path) {
-        std::cout << "Downloading: " << url << " -> " << output_path << std::endl;
+        std::cout << "Downloading: " << url << " -> " << output_path <<  "\n";
 
 #if defined(_WIN32)
         HINTERNET hInternet = InternetOpenA("Updater", INTERNET_OPEN_TYPE_DIRECT, nullptr, nullptr, 0);
@@ -55,7 +56,7 @@ namespace updater {
 
     // download and compare version files
     inline bool check_for_updates(const std::string& latest_version_url, const std::string& local_version_file) {
-        std::cout << "Checking for updates from: " << latest_version_url << std::endl;
+        std::cout << "Checking for updates from: " << latest_version_url <<  "\n";
 
         std::string temp_version_file = "latest_version.txt";
         if (!download_file(latest_version_url, temp_version_file)) {
@@ -66,7 +67,7 @@ namespace updater {
         std::ifstream current_file(local_version_file);
 
         if (!latest_file || !current_file) {
-            std::cerr << "ERROR: Failed to open version files." << std::endl;
+            std::cerr << "ERROR: Failed to open version files." <<  "\n";
             return false;
         }
 
@@ -79,14 +80,16 @@ namespace updater {
 
         // Clean up temporary file
         if (std::remove(temp_version_file.c_str()) != 0) {
-            std::cerr << "WARNING: Failed to delete temporary version file: " << temp_version_file << std::endl;
+            std::cerr << "WARNING: Failed to delete temporary version file: " << temp_version_file <<  "\n";
         }
 
         return latest_version != current_version;
     }
 
+
+    // unzip source code
     inline bool extract_zip(const std::string& archive_file) {
-        std::cout << "Extracting source files from " << archive_file << std::endl;
+        std::cout << "Extracting source files from " << archive_file <<  "\n";
 
 #if defined(_WIN32)
         std::string extract_command = "unzip -o " + archive_file;
@@ -97,13 +100,15 @@ namespace updater {
         return system(extract_command.c_str()) == 0;
     }
 
+
+    // replace binary
     inline void replace_binary(const std::string& new_binary) {
-        std::cout << "Replacing current binary..." << std::endl;
+        std::cout << "Replacing current binary..." <<  "\n";
 
 #if defined(_WIN32)
         std::ofstream batchFile("replace_and_restart.bat");
         if (!batchFile) {
-            std::cerr << "ERROR: Failed to create batch file for self-replacement." << std::endl;
+            std::cerr << "ERROR: Failed to create batch file for self-replacement." <<  "\n";
             return;
         }
 
@@ -121,7 +126,7 @@ namespace updater {
 #elif defined(__linux__) || defined(__APPLE__)
         std::ofstream scriptFile("replace_and_restart.sh");
         if (!scriptFile) {
-            std::cerr << "ERROR: Failed to create shell script for self-replacement." << std::endl;
+            std::cerr << "ERROR: Failed to create shell script for self-replacement." <<  "\n";
             return;
         }
 
@@ -139,7 +144,33 @@ namespace updater {
 #endif
     }
 
+    // generate ninja build file
+    inline bool generate_ninja_build_file() {
+        std::ofstream buildFile("build.ninja");
+        if (!buildFile) {
+            std::cerr << "ERROR: Failed to create build.ninja file.\n";
+            return false;
+        }
 
+#if defined(_WIN32)
+        std::string compiler = "cl";
+#elif defined(__linux__) || defined(__APPLE__)
+        std::string compiler = "g++";
+#endif
+
+        buildFile << "rule cxx\n"
+            << "  command = " << compiler << " -std=c++20 -o updater_new src/main.cpp\n"
+            << "  description = Building updater...\n"
+            << "\n"
+            << "build updater_new: cxx src/main.cpp\n";
+
+        buildFile.close();
+
+        return true;
+    }
+
+
+    // build from source
     inline void update_from_source(const std::string& source_zip_url) {
         std::cout << "Updating from source..." << std::endl;
 
@@ -151,18 +182,61 @@ namespace updater {
 
         if (!extract_zip(archive_file)) return;
 
+        // DELETE source_code.zip AFTER extracting
+        if (std::remove(archive_file.c_str()) != 0) {
+            std::cerr << "WARNING: Failed to delete " << archive_file << std::endl;
+        }
+
+        // MOVE FILES from the extracted folder to the current directory
+        std::string extracted_folder = "Cpp_Project_Updater-main";
+
+#if defined(_WIN32)
+        std::string move_command = "xcopy /E /Y /Q " + extracted_folder + "\\* .";
+#else
+        std::string move_command = "cp -r " + extracted_folder + "/* .";
+#endif
+
+        if (system(move_command.c_str()) != 0) {
+            std::cerr << "ERROR: Failed to move extracted files.\n";
+            return;
+        }
+
+#if defined(_WIN32)
+        std::string remove_command = "rmdir /s /q " + extracted_folder;
+#else
+        std::string remove_command = "rm -rf " + extracted_folder;
+#endif
+
+        if (system(remove_command.c_str()) != 0) {
+            std::cerr << "WARNING: Failed to delete extracted folder: " << extracted_folder << std::endl;
+        }
+
+        // Ensure build.ninja is created
+        if (!generate_ninja_build_file()) {
+            std::cerr << "ERROR: Failed to create build.ninja\n";
+            return;
+        }
+
+        // Run Ninja inside the extracted directory
+#if defined(_WIN32)
+        std::string ninja_command = "cd " + extracted_folder + " && ninja";
+#else
+        std::string ninja_command = "cd " + extracted_folder + " && ./ninja";
+#endif
+
+        if (system(ninja_command.c_str()) != 0) {
+            std::cerr << "ERROR: Compilation failed! Update aborted." << std::endl;
+            return;
+        }
+
         std::string new_binary = "updater_new";
 #if defined(_WIN32)
         new_binary += ".exe";
 #endif
 
-        if (system("ninja") != 0) {
-            std::cerr << "ERROR: Compilation failed! Update aborted." << std::endl;
-            return;
-        }
-
         replace_binary(new_binary);
     }
+
 
 } // namespace updater
 
