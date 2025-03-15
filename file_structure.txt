@@ -1,0 +1,8 @@
+/Cpp_Project_Updater
+│── include/
+│   │── config.hpp        # Configuration (URLs, paths, constants)
+│   │── updater.hpp       # Main update process (downloads, extraction, replacements)
+│   │── build_system.hpp  # Handles Clang & Ninja setup, generates build files
+│
+│── main.cpp              # Entry point
+│── CMakeLists.txt        # CMake build script (if needed)
